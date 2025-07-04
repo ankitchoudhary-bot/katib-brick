@@ -193,6 +193,6 @@ implementation:
     #   - --y_train
     #   - {inputPath: y_train}
     #   - --model
-      - {inputPath: model}
+    #   - {inputPath: model}
       - --best_hyperparams
       - {outputPath: best_hyperparams}
