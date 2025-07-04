@@ -1,0 +1,198 @@
+name: Tune Hyperparameters
+description: Generic hyperparameter tuning using Katib for a given model type.
+inputs:
+  - {name: model_type, type: String, description: "Choose one of ['sklearn', 'xgboost', 'pytorch']"}
+  # - {name: X_train, type: JsonArray}
+  # - {name: y_train, type: JsonArray}
+  # - {name: model, type: model}
+outputs:
+  - {name: best_hyperparams, type: JsonArray}
+implementation:
+  container:
+    image: python:3.9
+    command:
+      - sh
+      - -c
+      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn' 'kubernetes' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn' 'kubernetes' --user) && "$0" "$@"
+      - python3
+      - -u
+      - -c
+      - |
+        import argparse
+        import json
+        import os
+        import time
+        from kubernetes import client, config
+
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--model_type", type=str, required=True)
+        parser.add_argument("--X_train", type=str, required=True)
+        parser.add_argument("--y_train", type=str, required=True)
+        parser.add_argument("--model",type=str, required=True)
+        parser.add_argument("--best_hyperparams", type=str, required=True)
+        args = parser.parse_args()
+
+        config.load_incluster_config()
+
+        model_type = args.model_type.lower()
+        name = f"{model_type}-katib-exp"
+        namespace = "kubeflow"
+
+        search_spaces = {
+            "sklearn": [
+                {"name": "max_depth", "parameterType": "int", "feasibleSpace": {"min": "3", "max": "10"}},
+                {"name": "n_estimators", "parameterType": "int", "feasibleSpace": {"min": "50", "max": "150"}}
+            ],
+            "xgboost": [
+                {"name": "max_depth", "parameterType": "int", "feasibleSpace": {"min": "3", "max": "12"}},
+                {"name": "learning_rate", "parameterType": "double", "feasibleSpace": {"min": "0.01", "max": "0.3"}}
+            ],
+            "pytorch": [
+                {"name": "lr", "parameterType": "double", "feasibleSpace": {"min": "0.0001", "max": "0.1"}},
+                {"name": "threshold", "parameterType": "double", "feasibleSpace": {"min": "0.5", "max": "3"}}
+            ]
+        }
+
+        if model_type not in search_spaces:
+            raise ValueError(f"Unsupported model type: {model_type}")
+
+        parameters = search_spaces[model_type]
+        metric_name = "accuracy"
+        maximize = True
+
+        def objective(parameters):
+          lr = float(parameters["lr"])
+          threshold = float(parameters["threshold"])
+          import torch
+          import torch.nn as nn
+          from torchvision.datasets import MNIST
+          from torchvision.transforms import Compose, ToTensor, Normalize, Lambda
+          from torch.utils.data import DataLoader
+          from torch.optim import Adam
+          from tqdm import tqdm
+          import time
+
+          # Add small delay (e.g. if rate-limiting)
+          time.sleep(5)
+
+          device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+          # Data loader
+          def MNIST_loaders(train_batch_size=5000, test_batch_size=1000):
+              transform = Compose([
+                  ToTensor(),
+                  Normalize((0.1307,), (0.3081,)),
+                  Lambda(lambda x: torch.flatten(x))])
+              train_loader = DataLoader(MNIST('./data/', train=True, download=True, transform=transform), batch_size=train_batch_size, shuffle=True)
+              test_loader = DataLoader(MNIST('./data/', train=False, download=True, transform=transform), batch_size=test_batch_size, shuffle=False)
+              return train_loader, test_loader
+
+          def overlay_y_on_x(x, y):
+              x_ = x.clone()
+              x_[:, :10] *= 0.0
+              x_[range(x.shape[0]), y] = x.max()
+              return x_
+
+          class Layer(nn.Linear):
+              def __init__(self, in_features, out_features, lr, threshold, bias=True, device=None, dtype=None):
+                  super().__init__(in_features, out_features, bias, device, dtype)
+                  self.relu = torch.nn.ReLU()
+                  self.opt = Adam(self.parameters(), lr=lr)
+                  self.threshold = threshold
+                  self.num_epochs = 2
+
+              def forward(self, x):
+                  x_direction = x / (x.norm(2, 1, keepdim=True) + 1e-4)
+                  return self.relu(torch.mm(x_direction, self.weight.T) + self.bias.unsqueeze(0))
+
+              def train(self, x_pos, x_neg):
+                  for _ in tqdm(range(self.num_epochs)):
+                      g_pos = self.forward(x_pos).pow(2).mean(1)
+                      g_neg = self.forward(x_neg).pow(2).mean(1)
+                      loss = torch.log(1 + torch.exp(torch.cat([
+                          -g_pos + self.threshold,
+                          g_neg - self.threshold]))).mean()
+                      self.opt.zero_grad()
+                      loss.backward()
+                      self.opt.step()
+                  return self.forward(x_pos).detach(), self.forward(x_neg).detach()
+
+          class Net(torch.nn.Module):
+              def __init__(self, dims, lr, threshold):
+                  super().__init__()
+                  self.layers = [Layer(dims[i], dims[i+1], lr, threshold).to(device) for i in range(len(dims)-1)]
+
+              def predict(self, x):
+                  goodness_per_label = []
+                  for label in range(10):
+                      h = overlay_y_on_x(x, label)
+                      goodness = []
+                      for layer in self.layers:
+                          h = layer(h)
+                          goodness.append(h.pow(2).mean(1))
+                      goodness_per_label.append(sum(goodness).unsqueeze(1))
+                  return torch.cat(goodness_per_label, 1).argmax(1)
+
+              def train(self, x_pos, x_neg):
+                  h_pos, h_neg = x_pos, x_neg
+                  for layer in self.layers:
+                      h_pos, h_neg = layer.train(h_pos, h_neg)
+
+          # Main training & evaluation block (now inside the function)
+          torch.manual_seed(1234)
+          train_loader, test_loader = MNIST_loaders()
+          net = Net([784, 50, 50], parameters["lr"], parameters["threshold"])
+          x, y = next(iter(train_loader))
+          x, y = x.to(device), y.to(device)
+          x_pos = overlay_y_on_x(x, y)
+          rnd = torch.randperm(x.size(0))
+          x_neg = overlay_y_on_x(x, y[rnd])
+          net.train(x_pos, x_neg)
+
+          x_te, y_te = next(iter(test_loader))
+          x_te, y_te = x_te.to(device), y_te.to(device)
+          acc = net.predict(x_te).eq(y_te).float().mean().item()
+          print(f"accuracy={acc}")
+          return acc
+        
+        import kubeflow.katib as katib
+
+        parameters = {
+        "lr": katib.search.double(min=0.0001, max=0.1),
+        "threshold": katib.search.double(min=0.1, max=5)
+        }
+
+
+        katib_client = katib.KatibClient(namespace="kubeflow")
+
+        name = "tune experiment-ff"
+        katib_client.tune(
+            name=name,
+            objective=objective,
+            parameters=parameters,
+            objective_metric_name="accuracy",
+            max_trial_count=12,
+            resources_per_trial={"cpu": "2"},
+        )
+
+        # [4] Wait until Katib Experiment is complete
+        katib_client.wait_for_experiment_condition(name=name)
+
+        # [5] Get the best hyperparameters.
+        print(katib_client.get_optimal_hyperparameters(name))
+
+        # Save the best hyperparameters
+        # os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
+        # with open(args.best_hyperparams, "w") as f:
+        #     json.dump({p["name"]: float(p["value"]) if "." in p["value"] else int(p["value"]) for p in best_trial}, f)
+    args:
+      - --model_type
+      - {inputValue: model_type}
+      - --X_train
+      - {inputPath: X_train}
+      - --y_train
+      - {inputPath: y_train}
+      - --model
+      - {inputPath: model}
+      - --best_hyperparams
+      - {outputPath: best_hyperparams}
