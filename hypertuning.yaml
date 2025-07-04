@@ -165,7 +165,7 @@ implementation:
 
         katib_client = katib.KatibClient(namespace="kubeflow")
 
-        name = "tune experiment-ff"
+        name = "tune-experiment-ff"
         katib_client.tune(
             name=name,
             objective=objective,
