@@ -1,12 +1,12 @@
 name: Tune Hyperparameters
 description: Generic hyperparameter tuning using Katib for a given model type.
-inputs:
-  - {name: model_type, type: String, description: "Choose one of ['sklearn', 'xgboost', 'pytorch']"}
-  # - {name: X_train, type: JsonArray}
-  # - {name: y_train, type: JsonArray}
-  # - {name: model, type: model}
-outputs:
-  - {name: best_hyperparams, type: JsonArray}
+# inputs:
+#   - {name: model_type, type: String, description: "Choose one of ['sklearn', 'xgboost', 'pytorch']"}
+#   # - {name: X_train, type: JsonArray}
+#   # - {name: y_train, type: JsonArray}
+#   # - {name: model, type: model}
+# outputs:
+#   - {name: best_hyperparams, type: JsonArray}
 implementation:
   container:
     image: python:3.9
@@ -25,40 +25,40 @@ implementation:
         from kubernetes import client, config
 
         parser = argparse.ArgumentParser()
-        parser.add_argument("--model_type", type=str, required=True)
-        parser.add_argument("--X_train", type=str, required=True)
-        parser.add_argument("--y_train", type=str, required=True)
-        parser.add_argument("--model",type=str, required=True)
-        parser.add_argument("--best_hyperparams", type=str, required=True)
+        # parser.add_argument("--model_type", type=str, required=True)
+        # parser.add_argument("--X_train", type=str, required=True)
+        # parser.add_argument("--y_train", type=str, required=True)
+        # parser.add_argument("--model",type=str, required=True)
+        # parser.add_argument("--best_hyperparams", type=str, required=True)
         args = parser.parse_args()
 
-        config.load_incluster_config()
+        # config.load_incluster_config()
 
-        model_type = args.model_type.lower()
-        name = f"{model_type}-katib-exp"
-        namespace = "kubeflow"
+        # model_type = args.model_type.lower()
+        # name = f"{model_type}-katib-exp"
+        # namespace = "kubeflow"
 
-        search_spaces = {
-            "sklearn": [
-                {"name": "max_depth", "parameterType": "int", "feasibleSpace": {"min": "3", "max": "10"}},
-                {"name": "n_estimators", "parameterType": "int", "feasibleSpace": {"min": "50", "max": "150"}}
-            ],
-            "xgboost": [
-                {"name": "max_depth", "parameterType": "int", "feasibleSpace": {"min": "3", "max": "12"}},
-                {"name": "learning_rate", "parameterType": "double", "feasibleSpace": {"min": "0.01", "max": "0.3"}}
-            ],
-            "pytorch": [
-                {"name": "lr", "parameterType": "double", "feasibleSpace": {"min": "0.0001", "max": "0.1"}},
-                {"name": "threshold", "parameterType": "double", "feasibleSpace": {"min": "0.5", "max": "3"}}
-            ]
-        }
+        # search_spaces = {
+        #     "sklearn": [
+        #         {"name": "max_depth", "parameterType": "int", "feasibleSpace": {"min": "3", "max": "10"}},
+        #         {"name": "n_estimators", "parameterType": "int", "feasibleSpace": {"min": "50", "max": "150"}}
+        #     ],
+        #     "xgboost": [
+        #         {"name": "max_depth", "parameterType": "int", "feasibleSpace": {"min": "3", "max": "12"}},
+        #         {"name": "learning_rate", "parameterType": "double", "feasibleSpace": {"min": "0.01", "max": "0.3"}}
+        #     ],
+        #     "pytorch": [
+        #         {"name": "lr", "parameterType": "double", "feasibleSpace": {"min": "0.0001", "max": "0.1"}},
+        #         {"name": "threshold", "parameterType": "double", "feasibleSpace": {"min": "0.5", "max": "3"}}
+        #     ]
+        # }
 
-        if model_type not in search_spaces:
-            raise ValueError(f"Unsupported model type: {model_type}")
+        # if model_type not in search_spaces:
+        #     raise ValueError(f"Unsupported model type: {model_type}")
 
-        parameters = search_spaces[model_type]
-        metric_name = "accuracy"
-        maximize = True
+        # parameters = search_spaces[model_type]
+        # metric_name = "accuracy"
+        # maximize = True
 
         def objective(parameters):
           lr = float(parameters["lr"])
@@ -186,13 +186,13 @@ implementation:
         # with open(args.best_hyperparams, "w") as f:
         #     json.dump({p["name"]: float(p["value"]) if "." in p["value"] else int(p["value"]) for p in best_trial}, f)
     args:
-      - --model_type
-      - {inputValue: model_type}
+    #   - --model_type
+    #   - {inputValue: model_type}
     #   - --X_train
     #   - {inputPath: X_train}
     #   - --y_train
     #   - {inputPath: y_train}
     #   - --model
     #   - {inputPath: model}
-      - --best_hyperparams
-      - {outputPath: best_hyperparams}
+    #   - --best_hyperparams
+    #   - {outputPath: best_hyperparams}
