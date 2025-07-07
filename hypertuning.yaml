@@ -9,11 +9,14 @@ outputs:
   - {name: best_hyperparams, type: JsonArray}
 implementation:
   container:
-    image: python:3.9
+    image: python:3.10
     command:
       - sh
       - -c
-      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn' 'kubernetes' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn' 'kubernetes' --user) && "$0" "$@"
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location pandas scikit-learn kubernetes || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location pandas scikit-learn kubernetes --user
+        exec "$0" "$@"
       - python3
       - -u
       - -c
