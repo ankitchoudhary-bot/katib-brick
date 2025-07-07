@@ -35,8 +35,6 @@ implementation:
         config.load_incluster_config()
 
         model_type = args.model_type.lower()
-        name = f"{model_type}-katib-exp"
-        namespace = "kubeflow"
 
         search_spaces = {
             "sklearn": [
@@ -56,9 +54,7 @@ implementation:
         if model_type not in search_spaces:
             raise ValueError(f"Unsupported model type: {model_type}")
 
-        parameters = search_spaces[model_type]
-        metric_name = "accuracy"
-        maximize = True
+        hyper_parameters = search_spaces[model_type]
 
         def objective(parameters):
           lr = float(parameters["lr"])
@@ -158,8 +154,8 @@ implementation:
         import kubeflow.katib as katib
 
         parameters = {
-        "lr": katib.search.double(min=0.0001, max=0.1),
-        "threshold": katib.search.double(min=0.1, max=5)
+        "hyper_parameters[0]['name']": katib.search.double(min=hyper_parameters[0]['feasibleSpace']['min'], max=hyper_parameters[0]['feasibleSpace']['max']),
+        "hyper_parameters[1]['name']": katib.search.double(min=hyper_parameters[1]['feasibleSpace']['min'], max=hyper_parameters[1]['feasibleSpace']['max'])
         }
 
 
@@ -172,6 +168,7 @@ implementation:
             parameters=parameters,
             objective_metric_name="accuracy",
             max_trial_count=12,
+            parallel_trial_count=3,
             resources_per_trial={"cpu": "2"},
         )
 
@@ -179,12 +176,14 @@ implementation:
         katib_client.wait_for_experiment_condition(name=name)
 
         # [5] Get the best hyperparameters.
-        print(katib_client.get_optimal_hyperparameters(name))
+        best = katib_client.get_optimal_hyperparameters(name=name)
+        params = best.parameter_assignments
+        hp_dict = {p.name: float(p.value) for p in params}
 
-        # Save the best hyperparameters
-        # os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
-        # with open(args.best_hyperparams, "w") as f:
-        #     json.dump({p["name"]: float(p["value"]) if "." in p["value"] else int(p["value"]) for p in best_trial}, f)
+        os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
+        with open(args.best_hyperparams, "w") as f:
+        json.dump(hp_dict, f,indent=2)
+      
     args:
       - --model_type
       - {inputValue: model_type}
@@ -196,3 +195,4 @@ implementation:
       - {inputPath: model}
       - --best_hyperparams
       - {outputPath: best_hyperparams}
+      
