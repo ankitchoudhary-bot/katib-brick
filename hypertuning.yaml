@@ -2,18 +2,21 @@ name: Tune Hyperparameters
 description: Generic hyperparameter tuning using Katib for a given model type.
 inputs:
   - {name: model_type, type: String, description: "Choose one of ['sklearn', 'xgboost', 'pytorch']"}
-#   - {name: X_train, type: JsonArray}
-#   - {name: y_train, type: JsonArray}
-#   - {name: model, type: model}
+  # - {name: X_train, type: JsonArray}
+  # - {name: y_train, type: JsonArray}
+  # - {name: model, type: model}
 outputs:
   - {name: best_hyperparams, type: JsonArray}
 implementation:
   container:
-    image: python:3.9
+    image: python:3.10
     command:
       - sh
       - -c
-      - (PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn' 'kubernetes' || PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location 'pandas' 'scikit-learn' 'kubernetes' --user) && "$0" "$@"
+      - |
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location pandas scikit-learn kubernetes || \
+        PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet --no-warn-script-location pandas scikit-learn kubernetes --user
+        exec "$0" "$@"
       - python3
       - -u
       - -c
@@ -187,12 +190,12 @@ implementation:
     args:
       - --model_type
       - {inputValue: model_type}
-      - --X_train
-      - {inputPath: X_train}
-      - --y_train
-      - {inputPath: y_train}
-      - --model
-      - {inputPath: model}
+      # - --X_train
+      # - {inputPath: X_train}
+      # - --y_train
+      # - {inputPath: y_train}
+      # - --model
+      # - {inputPath: model}
       - --best_hyperparams
       - {outputPath: best_hyperparams}
       
