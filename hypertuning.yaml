@@ -140,7 +140,7 @@ implementation:
           # Main training & evaluation block (now inside the function)
           torch.manual_seed(1234)
           train_loader, test_loader = MNIST_loaders()
-          net = Net([784, 50, 50], parameters["lr"], parameters["threshold"])
+          net = Net([784, 50, 50], lr, threshold)
           x, y = next(iter(train_loader))
           x, y = x.to(device), y.to(device)
           x_pos = overlay_y_on_x(x, y)
@@ -157,9 +157,13 @@ implementation:
         import kubeflow.katib as katib
 
         parameters = {
-        "hyper_parameters[0]['name']": katib.search.double(min=hyper_parameters[0]['feasibleSpace']['min'], max=hyper_parameters[0]['feasibleSpace']['max']),
-        "hyper_parameters[1]['name']": katib.search.double(min=hyper_parameters[1]['feasibleSpace']['min'], max=hyper_parameters[1]['feasibleSpace']['max'])
+            p["name"]: katib.search.double(
+                min=p["feasibleSpace"]["min"],
+                max=p["feasibleSpace"]["max"]
+            )
+            for p in hyper_parameters
         }
+
 
 
         katib_client = katib.KatibClient(namespace="kubeflow")
@@ -183,7 +187,10 @@ implementation:
         params = best.parameter_assignments
         hp_dict = {p.name: float(p.value) for p in params}
 
-        os.makedirs(os.path.dirname(args.best_hyperparams), exist_ok=True)
+        dir_path = os.path.dirname(args.best_hyperparams)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+            
         with open(args.best_hyperparams, "w") as f:
             json.dump(hp_dict, f,indent=2)
       
